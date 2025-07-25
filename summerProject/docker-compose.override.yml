@@ -1,0 +1,68 @@
+services:
+  catalogdb:
+    container_name: catalogdb
+    restart: always
+    volumes:
+      - /d/project/data/catalog/mongo:/data/db
+    ports:
+      - "27017:27017"
+  catalog.api:
+    container_name: catalogAPI
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+      - "CatalogDatabaseSettings:ConnectionString=mongodb://catalogdb:27017"
+    depends_on:
+      - catalogdb
+    ports:
+      - "6000:8080"
+      - "6060:8081"
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/home/app/.microsoft/usersecrets:ro
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
+  messagebroker:
+    container_name: messagebroker
+    hostname: ecommerce-mq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+      
+  orderdb:
+    container_name: orderdb
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=SwN12345678
+    restart: always
+    ports:
+      - "1433:1433"
+      
+      
+      
+  orderingapi:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+      - ConnectionStrings__Database=Server=orderdb;Database=OrderDb;User Id=sa;Password=SwN12345678;Encrypt=False;TrustServerCertificate=True
+      - MessageBrokerSettings__Host=amqp://ecommerce-mq:5672
+      - MessageBrokerSettings__UserName=guest
+      - MessageBrokerSettings__Password=guest
+      - FeatureManagement__OrderFullfilment=false 
+    ports:
+      - "6003:8080"
+      - "6063:8081"
+    depends_on:
+      - orderdb
+      - messagebroker
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/home/app/.microsoft/usersecrets:ro
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
