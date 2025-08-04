@@ -7,9 +7,11 @@
     <UserSecretsId>4523ed27-204b-459f-a924-19b11523ea5a</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>..\..\..</DockerfileContext>
+    <DockerComposeProjectPath>..\..\..\docker-compose.dcproj</DockerComposeProjectPath>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="15.0.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.7">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -25,18 +27,13 @@
 	
 
   <ItemGroup>
-    <Folder Include="Data\Interceptors\" />
-    <Folder Include="Data\Extensions\" />
-    <Folder Include="Data\Migration\" />
-    <Folder Include="Schedule\Commands\CreateSchedule\" />
-    <Folder Include="Schedule\Commands\CreateDetail\" />
-    <Folder Include="Schedule\Commands\CreateScheduleFromTemplate\" />
-    <Folder Include="Schedule\Commands\DeleteSchedule\" />
-    <Folder Include="Schedule\Commands\DeleteDetail\" />
-    <Folder Include="Schedule\Commands\UpdateSchedule\" />
-    <Folder Include="Schedule\Queries\GetScheduleByCustomer\" />
-    <Folder Include="Schedule\Queries\GetScheduleById\" />
-    <Folder Include="Schedule\Queries\" />
+    <Folder Include="Data\Migrations\" />
+  </ItemGroup>
+	
+	
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\BuildingBlocks\BuildingBlocks.csproj" />
   </ItemGroup>
 
 </Project>

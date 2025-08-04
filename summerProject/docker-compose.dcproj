@@ -15,5 +15,12 @@
     </None>
     <None Include="docker-compose.yml" />
     <None Include=".dockerignore" />
+    <None Include="observability\alloy\config.river" />
+    <None Include="observability\gateway\nginx.conf" />
+    <None Include="observability\grafana\datasource.yml" />
+    <None Include="observability\loki\loki-config.yaml" />
+    <None Include="observability\otel\otelcol-config.yaml" />
+    <None Include="observability\prometheus\prometheus.yml" />
+    <None Include="observability\tempo\tempo.yaml" />
   </ItemGroup>
 </Project>

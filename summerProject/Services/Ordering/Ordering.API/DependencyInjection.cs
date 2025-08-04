@@ -2,6 +2,7 @@
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration;
+using Microsoft.OpenApi.Models;
 
 namespace Ordering.API;
 
@@ -9,7 +10,14 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddControllers(); 
+
+        services.AddEndpointsApiExplorer();
+
+        services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo { Title = "Ordering API", Version = "v1" });
+        });
+        services.AddControllers();
 
         services.AddCarter();
 
@@ -35,3 +43,5 @@ public static class DependencyInjection
         return app;
     }
 }
+
+    

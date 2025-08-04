@@ -7,22 +7,21 @@ namespace Scheduling.API.Data.Configuration
     {
         public void Configure(EntityTypeBuilder<ScheduleTemplateDetail> builder)
         {
+            builder.ToTable("ScheduleTemplateDetails");
+
             builder.HasKey(x => x.Id);
 
             builder.Property(x => x.DayOfWeek)
                 .IsRequired();
 
             builder.Property(x => x.TimeSlot)
-                .HasConversion<string>()  // Lưu TimeSlot dưới dạng string
+                .HasConversion<string>() // lưu enum TimeSlot dạng string
                 .IsRequired();
 
             builder.HasOne(x => x.Meal)
                 .WithMany(m => m.TemplateDetails)
-                .HasForeignKey(x => x.MealId);
-
-            builder.HasOne(x => x.ScheduleTemplate)
-                .WithMany(t => t.TemplateDetails)
-                .HasForeignKey(x => x.ScheduleTemplateId);
+                .HasForeignKey(x => x.MealId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 

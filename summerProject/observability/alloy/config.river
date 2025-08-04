@@ -1,0 +1,89 @@
+
+discovery.docker "flog_scrape" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "flog_scrape" {
+  targets = discovery.docker.flog_scrape.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_image_name"]
+    target_label  = "image"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+}
+
+loki.source.docker "flog_scrape" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.flog_scrape.targets
+  relabel_rules    = discovery.relabel.flog_scrape.rules
+  refresh_interval = "5s"
+  forward_to       = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url       = "http://loki-gateway:3100/loki/api/v1/push"
+    tenant_id = "default"
+  }
+
+  external_labels = {
+    source = "alloy",
+  }
+}
+
+prometheus.exporter.unix "default" {}
+
+
+prometheus.scrape "unix_metrics" {
+  targets = [
+    {
+      __address__ = "localhost:9100",
+    },
+  ]
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+
+  external_labels = {
+    source = "alloy",
+  }
+}
+
+
+otelcol.receiver.otlp "default" {
+  grpc {}
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

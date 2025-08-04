@@ -1,47 +1,52 @@
-﻿using System.Collections.Generic;
-
-namespace Scheduling.API.Repository.Impl
+﻿namespace Scheduling.API.Repository.Impl
 {
-    public abstract class GenericRepository<T> : IGenericRepository<T> where T : class
+    using Microsoft.EntityFrameworkCore;
+    using Scheduling.API.Data;
+    using System.Linq.Expressions;
+
+    public class GenericRepository<T> : IGenericRepository<T> where T : class
     {
-        protected readonly DbContext _context;
+        protected readonly SchedulingDbContext _context;
         protected readonly DbSet<T> _dbSet;
 
-        public GenericRepository(DbContext context)
+        public GenericRepository(SchedulingDbContext context)
         {
             _context = context;
             _dbSet = context.Set<T>();
         }
 
-        public async Task<IEnumerable<T>> GetAllAsync()
-        {
-            return await _dbSet.ToListAsync();
-        }
 
-        public async Task<T?> GetByIdAsync(Guid id)
-        {
-            return await _dbSet.FindAsync(id);
-        }
+        public async Task<T?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+            => await _dbSet.FindAsync(new object[] { id }, cancellationToken);
 
-        public async Task AddAsync(T entity)
-        {
-            await _dbSet.AddAsync(entity);
-        }
+        public async Task<IEnumerable<T>> GetAllAsync(CancellationToken cancellationToken = default)
+            => await _dbSet.ToListAsync(cancellationToken);
+
+        public async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default)
+            => await _dbSet.Where(predicate).ToListAsync(cancellationToken);
+
+        public IQueryable<T> Query() => _dbSet.AsQueryable();
+
+        public async Task AddAsync(T entity, CancellationToken cancellationToken = default)
+            => await _dbSet.AddAsync(entity, cancellationToken);
+
+        public async Task AddRangeAsync(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+            => await _dbSet.AddRangeAsync(entities, cancellationToken);
 
         public void Update(T entity)
-        {
-            _dbSet.Update(entity);
-        }
+            => _dbSet.Update(entity);
+
+        public void UpdateRange(IEnumerable<T> entities)
+            => _dbSet.UpdateRange(entities);
 
         public void Delete(T entity)
-        {
-            _dbSet.Remove(entity);
-        }
+            => _dbSet.Remove(entity);
 
-        public async Task<bool> SaveChangesAsync()
-        {
-            return await _context.SaveChangesAsync() > 0;
-        }
+        public void DeleteRange(IEnumerable<T> entities)
+            => _dbSet.RemoveRange(entities);
+
+        public async Task<bool> SaveChangesAsync(CancellationToken cancellationToken = default)
+            => (await _context.SaveChangesAsync(cancellationToken)) > 0;
     }
 
 }

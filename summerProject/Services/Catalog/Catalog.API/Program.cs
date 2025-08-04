@@ -10,6 +10,12 @@ using Catalog.API.Services.impl;
 using Catalog.API.Settings;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
+using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +33,7 @@ builder.Services.AddAutoMapper(cfg =>{ }, typeof(CustomMapperProfile).Assembly);
 
 
 // 3. Add MongoDB Settings
+BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
 builder.Services.Configure<CatalogDatabaseSettings>(
     builder.Configuration.GetSection(nameof(CatalogDatabaseSettings)));
 builder.Services.AddSingleton<ICatalogDatabaseSettings>(sp =>
@@ -60,13 +67,40 @@ builder.Services.AddExceptionHandler<CustomExceptionHandler>();
 
 
 // 7. Swagger
+builder.Services.AddEndpointsApiExplorer();
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Catalog API", Version = "v1" });
 });
 
+// OpenTelemetry setup
+var serviceName = "ordering-api";
+var serviceVersion = "1.0.0";
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracer =>
+    {
+        tracer
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
+    });
+
 var app = builder.Build();
 var env = builder.Environment;
+
+app.MapGet("/", () => "hello worlds");
 
 // 8. Middleware pipeline
 if (env.IsDevelopment())

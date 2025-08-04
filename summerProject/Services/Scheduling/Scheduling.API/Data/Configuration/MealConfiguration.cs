@@ -6,10 +6,10 @@ namespace Scheduling.API.Data.Configuration
 {
     public class MealConfiguration : IEntityTypeConfiguration<Meal>
     {
-
-
         public void Configure(EntityTypeBuilder<Meal> builder)
         {
+            builder.ToTable("Meals");
+
             builder.HasKey(x => x.Id);
 
             builder.Property(x => x.Name)
@@ -18,16 +18,6 @@ namespace Scheduling.API.Data.Configuration
 
             builder.Property(x => x.Description)
                 .HasMaxLength(255);
-
-            builder.HasMany(x => x.TemplateDetails)
-                .WithOne(d => d.Meal)
-                .HasForeignKey(d => d.MealId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            builder.HasMany(x => x.InstanceDetails)
-                .WithOne(d => d.Meal)
-                .HasForeignKey(d => d.MealId)
-                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 

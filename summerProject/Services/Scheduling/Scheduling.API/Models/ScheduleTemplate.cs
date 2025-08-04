@@ -3,9 +3,14 @@
     public class ScheduleTemplate
     {
         public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
+        public string Name { get; set; } = default!;
 
-        public IEnumerable<ScheduleTemplateDetail> TemplateDetails { get; set; }
+        // Thông tin mô tả template
+        public string? Description { get; set; }
+
+
+       
+        public ICollection<ScheduleTemplateDetail> TemplateDetails { get; set; } = new List<ScheduleTemplateDetail>();
     }
 
 }

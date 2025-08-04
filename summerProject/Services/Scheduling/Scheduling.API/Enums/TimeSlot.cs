@@ -8,5 +8,4 @@
         Snack,
         Supper
     }
-
 }

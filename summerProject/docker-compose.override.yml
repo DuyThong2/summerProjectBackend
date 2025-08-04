@@ -46,6 +46,7 @@ services:
       
       
   orderingapi:
+    container_name: orderingAPI
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_HTTP_PORTS=8080
@@ -66,3 +67,182 @@ services:
       - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
       - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
       - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
+
+  schedulingdb:
+    container_name: schedulingdb
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=SwN12345678
+    restart: always
+    ports:
+      - "1434:1433" 
+    volumes:
+      - schedulingdb_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/1433' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 6s
+    
+
+
+  scheduling.api:
+    container_name: schedulingAPI
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+      - ConnectionStrings__DefaultConnection=Server=schedulingdb;Database=SchedulingDb;User Id=sa;Password=SwN12345678;Encrypt=False;TrustServerCertificate=True
+    ports:
+      - "6002:8080"
+      - "6062:8081"
+    depends_on:
+      schedulingdb:
+        condition: service_healthy
+        
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/home/app/.microsoft/usersecrets:ro
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
+
+  
+  
+  
+  
+  
+  yarpapigateway:
+    container_name: yarpApiGateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+    ports:
+      - "6004:8080"
+      - "6064:8081"
+    depends_on:
+      - catalog.api
+      - scheduling.api
+      - orderingapi
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/home/app/.microsoft/usersecrets:ro
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/home/app/.aspnet/https:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
+
+  minio:
+    container_name: minio
+    command: server /data
+    environment:
+      - MINIO_ROOT_USER=loki
+      - MINIO_ROOT_PASSWORD=supersecret
+    volumes:
+      - ./observability/minio:/data
+    ports:
+      - "9000:9000"
+
+  loki-read:
+    command: -config.file=/etc/loki/config.yaml -target=read
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+
+  loki-write:
+    command: -config.file=/etc/loki/config.yaml -target=write
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+
+  loki-backend:
+    command: -config.file=/etc/loki/config.yaml -target=backend
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+
+  loki-gateway:
+    image: nginx:stable
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - loki-read
+      - loki-write
+      - loki-backend
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana-oss
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+    depends_on:
+      - loki-gateway
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+
+  tempo:
+    container_name: tempo
+    image: grafana/tempo
+    ports:
+      - "3200:3200"  
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo.yaml
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    restart: unless-stopped
+
+  otel-collector:
+    container_name: otel-collector
+    image: otel/opentelemetry-collector-contrib
+    command:
+      - "--config=/etc/otelcol-config.yaml"
+    volumes:
+      - ./observability/otel/otelcol-config.yaml:/etc/otelcol-config.yaml
+    ports:
+      - "4317:4317"
+      - "8889:8889" 
+      - "55679:55679"
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  alloy:
+    container_name: alloy
+    image: grafana/alloy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./observability/alloy/config.river:/etc/alloy/config.alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    depends_on:
+      - loki-gateway
+      - prometheus
+      - tempo
+    restart: unless-stopped
+volumes:
+  schedulingdb_data:
+  grafana-data:
+  
+
+
+
+
+

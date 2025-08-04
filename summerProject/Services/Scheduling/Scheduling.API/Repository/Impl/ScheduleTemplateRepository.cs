@@ -1,18 +1,24 @@
-﻿using Scheduling.API.Models;
-
-namespace Scheduling.API.Repository.Impl
+﻿namespace Scheduling.API.Repository.Impl
 {
-    
+    using Microsoft.EntityFrameworkCore;
+    using Scheduling.API.Data;
 
-    public class ScheduleTemplateRepository : GenericRepository<ScheduleTemplate>, IScheduleTemplateRepository
+    public class ScheduleTemplateRepository
+        : GenericRepository<ScheduleTemplate>, IScheduleTemplateRepository
     {
-        public ScheduleTemplateRepository(DbContext context) : base(context) { }
+        private readonly SchedulingDbContext _db;
 
-        public async Task<ScheduleTemplate?> GetWithDetailsAsync(Guid id)
+        public ScheduleTemplateRepository(SchedulingDbContext db) : base(db)
         {
-            return await _context.Set<ScheduleTemplate>()
+            _db = db;
+        }
+
+        public async Task<ScheduleTemplate?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            return await _db.ScheduleTemplates
                 .Include(t => t.TemplateDetails)
-                .FirstOrDefaultAsync(t => t.Id == id);
+                .ThenInclude(d => d.Meal)
+                .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
         }
     }
 
