@@ -1,0 +1,102 @@
+// ci/Jenkinsfile.service
+//.NET API: restore ? build ? test ? publish ? docker build/push ? (optional) sonar
+
+pipeline {
+  agent any
+  environment {
+    DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+
+    // --- c?u hình registry & tag ---
+    REGISTRY_CREDENTIALS = credentials('dockerhub-creds')          // ??i id theo Jenkins
+    REGISTRY              = "${params.REGISTRY ?: 'docker.io'}"
+    IMAGE_REPO            = "${params.IMAGE_REPO}"                  // ví d?: yourhub/catalog-api
+    IMAGE_TAG             = "${params.IMAGE_TAG ?: env.BUILD_NUMBER}"
+
+    // --- sonar (optional) ---
+    SONAR_ENABLED         = "${params.SONAR_ENABLED ?: 'false'}"
+    SONAR_KEY             = "${params.SONAR_PROJECT_KEY ?: ''}"
+    SONAR_TOKEN           = credentials('sonar-token')              // ??i id theo Jenkins
+  }
+
+  options { timestamps() }
+
+  parameters {
+    string(name: 'CSProj',        description: '???ng d?n file .csproj', defaultValue: '')
+    string(name: 'ProjectDir',    description: 'Th? m?c ch?a project (context docker)', defaultValue: '')
+    string(name: 'IMAGE_REPO',    description: 'Tên image (namespace/repo)', defaultValue: '')
+    string(name: 'IMAGE_TAG',     description: 'Tag image (m?c ??nh BUILD_NUMBER)', defaultValue: '')
+    string(name: 'REGISTRY',      description: '??ng lên registry nào', defaultValue: 'docker.io')
+    booleanParam(name: 'PUBLISH_SELF_CONTAINED', defaultValue: false, description: 'dotnet publish self-contained')
+    booleanParam(name: 'SONAR_ENABLED', defaultValue: false, description: 'B?t SonarQube?')
+    string(name: 'SONAR_PROJECT_KEY', defaultValue: '', description: 'Key d? án trên Sonar')
+    string(name: 'DOTNET_CONFIG', defaultValue: 'Release', description: 'C?u hình build')
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Sonar Begin') {
+      when { expression { return params.SONAR_ENABLED && params.SONAR_PROJECT_KEY?.trim() } }
+      steps {
+        withSonarQubeEnv('SonarQube') {
+          sh """
+            dotnet tool update --global dotnet-sonarscanner || dotnet tool install --global dotnet-sonarscanner
+            export PATH=\$PATH:\$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools
+            dotnet sonarscanner begin /k:"${SONAR_KEY}" /d:sonar.login=${SONAR_TOKEN} /d:sonar.host.url=$SONAR_HOST_URL
+          """
+        }
+      }
+    }
+
+    stage('Restore & Build & Test') {
+      steps {
+        sh """
+          dotnet restore "${params.CSProj}"
+          dotnet build   "${params.CSProj}" -c ${params.DOTNET_CONFIG} --no-restore
+          dotnet test    "${params.CSProj}" --no-build --logger 'trx;LogFileName=test.trx' || true
+        """
+      }
+    }
+
+    stage('Publish') {
+      steps {
+        script {
+          def publishArgs = params.PUBLISH_SELF_CONTAINED ? "-p:PublishSingleFile=true -p:PublishTrimmed=true --self-contained true" : ""
+          sh """
+            dotnet publish "${params.CSProj}" -c ${params.DOTNET_CONFIG} -o "${params.ProjectDir}/publish" ${publishArgs}
+          """
+        }
+      }
+    }
+
+    stage('Docker Build & Push') {
+      steps {
+        sh """
+          echo ${REGISTRY_CREDENTIALS_PSW} | docker login ${REGISTRY} -u ${REGISTRY_CREDENTIALS_USR} --password-stdin
+          docker build -t ${IMAGE_REPO}:${IMAGE_TAG} -f ${params.ProjectDir}/Dockerfile ${params.ProjectDir}
+          docker push  ${IMAGE_REPO}:${IMAGE_TAG}
+          docker tag   ${IMAGE_REPO}:${IMAGE_TAG} ${IMAGE_REPO}:latest
+          docker push  ${IMAGE_REPO}:latest
+        """
+      }
+    }
+
+    stage('Sonar End') {
+      when { expression { return params.SONAR_ENABLED && params.SONAR_PROJECT_KEY?.trim() } }
+      steps {
+        sh """
+          export PATH=\$PATH:\$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools
+          dotnet sonarscanner end /d:sonar.login=${SONAR_TOKEN}
+        """
+      }
+    }
+  }
+
+  post {
+    always {
+      junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'
+    }
+  }
+}

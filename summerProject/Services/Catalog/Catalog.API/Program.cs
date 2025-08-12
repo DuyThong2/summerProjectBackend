@@ -16,10 +16,13 @@ using MongoDB.Bson;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
+using Prometheus;
+using OpenTelemetry.Exporter;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Add MediatR
+// 1. MediatR
 builder.Services.AddMediatR(config =>
 {
     config.RegisterServicesFromAssembly(typeof(Program).Assembly);
@@ -27,12 +30,11 @@ builder.Services.AddMediatR(config =>
     config.AddOpenBehavior(typeof(LoggingBehavior<,>));
 });
 
-// 2. Add Controllers
+// 2. AutoMapper & Controllers
 builder.Services.AddControllers();
-builder.Services.AddAutoMapper(cfg =>{ }, typeof(CustomMapperProfile).Assembly);
+builder.Services.AddAutoMapper(cfg => { }, typeof(CustomMapperProfile).Assembly);
 
-
-// 3. Add MongoDB Settings
+// 3. MongoDB Settings
 BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
 builder.Services.Configure<CatalogDatabaseSettings>(
     builder.Configuration.GetSection(nameof(CatalogDatabaseSettings)));
@@ -42,8 +44,7 @@ builder.Services.AddSingleton<ICatalogDatabaseSettings>(sp =>
 // 4. MongoDB Context
 builder.Services.AddTransient<ICatalogContext, CatalogContext>();
 
-
-// 5. Register Repositories
+// 5. Repositories
 builder.Services.AddScoped(typeof(IMongoRepository<>), typeof(MongoRepositoryBase<>));
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
 builder.Services.AddScoped<IIngredientRepository, IngredientRepository>();
@@ -52,7 +53,7 @@ builder.Services.AddScoped<IPackageRepository, PackageRepository>();
 builder.Services.AddScoped<IPackageIngredientRepository, PackageIngredientRepository>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 
-// 6. Register Services
+// 6. Services
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IIngredientService, IngredientService>();
 builder.Services.AddScoped<IMealService, MealService>();
@@ -60,50 +61,38 @@ builder.Services.AddScoped<IPackageService, PackageService>();
 builder.Services.AddScoped<IPackageIngredientService, PackageIngredientService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 
-//excception
+// 7. Exception Handler
 builder.Services.AddExceptionHandler<CustomExceptionHandler>();
 
-
-
-
-// 7. Swagger
+// 8. Swagger
 builder.Services.AddEndpointsApiExplorer();
-
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Catalog API", Version = "v1" });
 });
 
-// OpenTelemetry setup
-var serviceName = "ordering-api";
+// 9. OpenTelemetry
+var serviceName = "catalog-api";
 var serviceVersion = "1.0.0";
 
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracer =>
-    {
-        tracer
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
+    .WithTracing(tracerProviderBuilder =>
+        tracerProviderBuilder
+            .AddSource(new ActivitySource(serviceName).Name)
+            .ConfigureResource(resource => resource
+                .AddService(serviceName))
             .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    })
-    .WithMetrics(metrics =>
-    {
-        metrics
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    });
+            .AddConsoleExporter()
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("http://otel-collector:4317");
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
 
 var app = builder.Build();
-var env = builder.Environment;
 
-app.MapGet("/", () => "hello worlds");
-
-// 8. Middleware pipeline
-if (env.IsDevelopment())
+// 10. Middleware
+if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
@@ -114,8 +103,21 @@ if (env.IsDevelopment())
 
 app.UseExceptionHandler(options => { });
 
+app.UseMiddleware<TracingHeaderMiddleware>();
+
+// Prometheus HTTP request metrics (must come before routing)
+app.UseHttpMetrics();
+
 app.UseRouting();
 app.UseAuthorization();
-app.MapControllers();
+
+// Expose metrics endpoint at /metrics
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+    endpoints.MapMetrics(); // Prometheus metrics
+});
+
+app.MapGet("/", () => "hello worlds");
 
 app.Run();

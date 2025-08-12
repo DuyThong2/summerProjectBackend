@@ -13,6 +13,9 @@ using Microsoft.OpenApi.Models;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
+using Prometheus;
+using OpenTelemetry.Exporter;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,23 +50,18 @@ var serviceName = "scheduling-api";
 var serviceVersion = "1.0.0";
 
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracer =>
-    {
-        tracer
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
+    .WithTracing(tracerProviderBuilder =>
+        tracerProviderBuilder
+            .AddSource(new ActivitySource(serviceName).Name)
+            .ConfigureResource(resource => resource
+                .AddService(serviceName))
             .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    })
-    .WithMetrics(metrics =>
-    {
-        metrics
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    });
+            .AddConsoleExporter()
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("http://otel-collector:4317");
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
 
 var app = builder.Build();
 
@@ -75,7 +73,15 @@ if (app.Environment.IsDevelopment())
 }
 
 // 7. Map Controllers
-app.MapControllers();
+app.UseHttpMetrics();
+app.UseRouting(); 
+
+
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+    endpoints.MapMetrics(); 
+});
 
 // 8. Seed Database
 await app.InitialiseDatabaseAsync();

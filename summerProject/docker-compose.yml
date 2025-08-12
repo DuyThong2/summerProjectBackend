@@ -54,7 +54,7 @@ services:
     image: grafana/loki:3.1.2
 
   loki-gateway:
-    image: nginx
+    image: nginx:stable
 
   grafana:
     image: grafana/grafana

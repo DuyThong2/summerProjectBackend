@@ -165,7 +165,6 @@ services:
       - minio
 
   loki-gateway:
-    image: nginx:stable
     ports:
       - "3100:3100"
     volumes:
@@ -177,7 +176,6 @@ services:
 
   grafana:
     container_name: grafana
-    image: grafana/grafana-oss
     ports:
       - "3000:3000"
     volumes:
@@ -186,44 +184,30 @@ services:
     depends_on:
       - loki-gateway
 
-  prometheus:
-    container_name: prometheus
-    image: prom/prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-
   tempo:
     container_name: tempo
-    image: grafana/tempo
     ports:
+      - "4319:4317" 
+      - "4318:4318" 
       - "3200:3200"  
     volumes:
       - ./observability/tempo/tempo.yaml:/etc/tempo.yaml
     command: [ "-config.file=/etc/tempo.yaml" ]
-    restart: unless-stopped
 
   otel-collector:
     container_name: otel-collector
-    image: otel/opentelemetry-collector-contrib
     command:
       - "--config=/etc/otelcol-config.yaml"
     volumes:
       - ./observability/otel/otelcol-config.yaml:/etc/otelcol-config.yaml
     ports:
       - "4317:4317"
-      - "8889:8889" 
-      - "55679:55679"
     depends_on:
       - tempo
     restart: unless-stopped
 
   alloy:
     container_name: alloy
-    image: grafana/alloy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./observability/alloy/config.river:/etc/alloy/config.alloy
@@ -234,9 +218,16 @@ services:
       - /etc/alloy/config.alloy
     depends_on:
       - loki-gateway
-      - prometheus
-      - tempo
     restart: unless-stopped
+
+  prometheus:
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
 volumes:
   schedulingdb_data:
   grafana-data:

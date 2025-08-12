@@ -3,6 +3,7 @@ using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Models;
+using Prometheus;
 
 namespace Ordering.API;
 
@@ -30,18 +31,27 @@ public static class DependencyInjection
 
     public static WebApplication UseApiServices(this WebApplication app)
     {
-        app.MapControllers();
-        app.MapCarter();
+        app.UseRouting();
+
+        app.UseHttpMetrics(); 
 
         app.UseExceptionHandler(options => { });
-        app.UseHealthChecks("/health",
-            new HealthCheckOptions
-            {
-                ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
-            });
+
+        app.UseHealthChecks("/health", new HealthCheckOptions
+        {
+            ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+        });
+
+        app.UseEndpoints(endpoints =>
+        {
+            endpoints.MapControllers();
+            endpoints.MapCarter();
+            endpoints.MapMetrics(); 
+        });
 
         return app;
     }
+
 }
 
-    
+

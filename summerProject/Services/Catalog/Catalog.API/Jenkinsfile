@@ -1,0 +1,83 @@
+pipeline {
+  agent any
+  environment {
+    DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    CSPROJ      = 'Services/Catalog/Catalog.API/Catalog.API.csproj'
+    PROJECT_DIR = 'Services/Catalog/Catalog.API'
+
+    DOCKERHUB = credentials('dockerhub-creds')       // <--- change if needed
+    IMAGE_REPO = 'duythong2/catalog-api'               // <--- change to your DockerHub repo
+    IMAGE_TAG  = "${env.BUILD_NUMBER}"
+
+    SONAR_TOKEN      = credentials('sonartoken')     // <--- change if needed
+    SONAR_PROJECT_KEY = 'catalog-api'                 // <--- change to your Sonar project key
+  }
+  options { timestamps() }
+
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+
+    stage('Start Analysis') {
+      steps {
+        withSonarQubeEnv('SonarQube') {
+          sh '''
+            dotnet tool update --global dotnet-sonarscanner || dotnet tool install --global dotnet-sonarscanner
+            export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
+            dotnet sonarscanner begin /k:"'$SONAR_PROJECT_KEY'" /d:sonar.login="$SONAR_TOKEN" /d:sonar.host.url="$SONAR_HOST_URL"
+          '''
+        }
+      }
+    }
+
+    stage('Restore & Test') {
+      steps {
+        sh '''
+          dotnet restore "$CSPROJ"
+          dotnet test "$CSPROJ" -c Release --logger "trx;LogFileName=test.trx"
+        '''
+      }
+    }
+
+    stage('Build & Publish') {
+      steps {
+        sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
+      }
+    }
+
+    stage('Finish Analysis') {
+      steps {
+        sh '''
+          export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
+          dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"
+        '''
+      }
+    }
+
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 10, unit: 'MINUTES') {
+          script {
+            def qg = waitForQualityGate()
+            if (qg.status != 'OK') { error "Quality Gate failed: ${qg.status}" }
+          }
+        }
+      }
+    }
+
+    stage('Docker Build & Push') {
+      steps {
+        sh '''
+          echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
+          docker build -t "$IMAGE_REPO":"$IMAGE_TAG" -f "$PROJECT_DIR/Dockerfile" "$PROJECT_DIR"
+          docker push  "$IMAGE_REPO":"$IMAGE_TAG"
+          docker tag   "$IMAGE_REPO":"$IMAGE_TAG" "$IMAGE_REPO":latest
+          docker push  "$IMAGE_REPO":latest
+        '''
+      }
+    }
+  }
+
+  post {
+    always { junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx' }
+  }
+}

@@ -1,8 +1,11 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Prometheus;
 using YarpApiGatway.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,63 +14,56 @@ builder.Services.Configure<SwaggerSourceSetting>(
     builder.Configuration.GetSection(SwaggerSourceSetting.SectionName)
 );
 
+// CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy
-            .AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
     });
 });
 
-
-// 2. Add Swagger
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// 3. Add Reverse Proxy
+// Reverse Proxy (YARP)
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-// 4. Add Rate Limiter
-builder.Services.AddRateLimiter(rateLimiterOptions =>
+// Rate Limiter
+builder.Services.AddRateLimiter(options =>
 {
-    rateLimiterOptions.AddFixedWindowLimiter("fixed", options =>
+    options.AddFixedWindowLimiter("fixed", limiter =>
     {
-        options.Window = TimeSpan.FromSeconds(10);
-        options.PermitLimit = 5;
+        limiter.Window = TimeSpan.FromSeconds(10);
+        limiter.PermitLimit = 5;
     });
 });
 
-// OpenTelemetry setup
+// OpenTelemetry
 var serviceName = "yarp-gateway";
 var serviceVersion = "1.0.0";
 
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracer =>
-    {
-        tracer
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
+    .WithTracing(tracerProviderBuilder =>
+        tracerProviderBuilder
+            .AddSource(new ActivitySource(serviceName).Name)
+            .ConfigureResource(resource => resource
+                .AddService(serviceName))
             .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    })
-    .WithMetrics(metrics =>
-    {
-        metrics
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName, serviceVersion))
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddOtlpExporter(opt => opt.Endpoint = new Uri("http://otel-collector:4317"));
-    });
+            .AddConsoleExporter()
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("http://otel-collector:4317");
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
 
 var app = builder.Build();
-app.MapGet("/",() => "hello world");
 
-// ---- Middleware pipeline ----
+
+
+// Swagger UI
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -78,11 +74,27 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint(swaggerOptions.Ordering, "Ordering API");
 });
 
+// CORS
 app.UseCors("AllowAll");
-// (B) Rate Limiter
+
+// Rate Limiting
 app.UseRateLimiter();
 
-// (C) Reverse Proxy
-app.MapReverseProxy();
+// Routing + Metrics endpoint
+app.UseRouting();
+
+app.UseMiddleware<TracingHeaderMiddleware>();
+
+app.UseHttpMetrics();
+
+
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapReverseProxy();
+    endpoints.MapMetrics(); 
+});
+
+// Optional: root test
+app.MapGet("/", () => "hello world");
 
 app.Run();
