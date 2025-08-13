@@ -17,9 +17,6 @@ pipeline {
     // Toggles / infra
     ENABLE_SONAR_BRANCH   = '0'              // set '1' if SonarQube supports Branch Analysis (Developer+)
     DOCKER_LOCK_RESOURCE  = 'docker-daemon'  // requires Lockable Resources plugin; set '' if not available
-
-    // Will be set to '1' if relevant changes are detected
-    RUN_PIPELINE = '0'
   }
   options { timestamps(); disableConcurrentBuilds() }
 
@@ -48,7 +45,9 @@ pipeline {
           def pattern = ~/^(summerProject\/Services\/Ordering\/|summerProject\/Shared\/).*/
           def relevant = isFirst || diff.any { it ==~ pattern }
 
-          env.RUN_PIPELINE = relevant ? '1' : '0'
+          // Write a workspace marker for later stages (stable gating)
+          writeFile file: '.run_pipeline', text: (relevant ? '1' : '0')
+
           if (relevant) {
             def touched = diff.findAll { it ==~ pattern }
             echo "Relevant changes detected (or first build). Running heavy stages."
@@ -61,7 +60,7 @@ pipeline {
     }
 
     stage('Tools (local dotnet tools)') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
           set -e
@@ -85,23 +84,29 @@ pipeline {
     }
 
     stage('Start Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
           script {
-            // Optionally add branch name when enabled and not on main/master
-            def cmd = """dotnet tool run dotnet-sonarscanner begin /k:"$SONAR_PROJECT_KEY" /d:sonar.login="$SONAR_TOKEN" /d:sonar.host.url="$SONAR_HOST_URL" """
-            if (env.ENABLE_SONAR_BRANCH == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
-              cmd += " /d:sonar.branch.name=\\\"${env.BRANCH_NAME}\\\""
+            // Build command as list to avoid quoting issues
+            def args = [
+              'dotnet tool run dotnet-sonarscanner begin',
+              "/k:${env.SONAR_PROJECT_KEY}",
+              "/d:sonar.login=${env.SONAR_TOKEN}",
+              "/d:sonar.host.url=${env.SONAR_HOST_URL}"
+            ]
+            if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' &&
+                env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
+              args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
             }
-            sh cmd
+            sh args.join(' ')
           }
         }
       }
     }
 
     stage('Restore & Test') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
           dotnet restore "$CSPROJ"
@@ -111,14 +116,14 @@ pipeline {
     }
 
     stage('Build & Publish') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
       }
     }
 
     stage('Finish Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
           sh 'dotnet tool run dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"'
@@ -127,7 +132,7 @@ pipeline {
     }
 
     stage('Quality Gate') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         timeout(time: 10, unit: 'MINUTES') {
           script {
@@ -139,7 +144,7 @@ pipeline {
     }
 
     stage('Docker Build & Push') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         script {
           def dockerSteps = {

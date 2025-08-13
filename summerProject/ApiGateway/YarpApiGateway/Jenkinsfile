@@ -15,11 +15,9 @@ pipeline {
     DOCKERHUB   = credentials('dockerhub-creds')
     SONAR_TOKEN = credentials('sonartoken')
 
-    // Toggle & lock settings
-    ENABLE_SONAR_BRANCH = '0'          
-    DOCKER_LOCK_RESOURCE = 'docker-daemon'  
-
-    RUN_PIPELINE = '0'
+    // Toggles
+    ENABLE_SONAR_BRANCH = '0'            // set '1' if SonarQube supports Branch Analysis (Developer+)
+    DOCKER_LOCK_RESOURCE = 'docker-daemon' // requires Lockable Resources plugin; set '' if not available
   }
   options { timestamps(); disableConcurrentBuilds() }
 
@@ -43,12 +41,17 @@ pipeline {
               fi
             fi
           ''').trim().split("\\r?\\n").findAll { it?.trim() }
+
+          // ApiGateway + Shared
           def pattern = ~/^(summerProject\/ApiGateway\/|summerProject\/Shared\/).*/
           def relevant = isFirst || diff.any { it ==~ pattern }
-          env.RUN_PIPELINE = relevant ? '1' : '0'
+
+          // Write a workspace marker for later stages
+          writeFile file: '.run_pipeline', text: (relevant ? '1' : '0')
+
           if (relevant) {
             def touched = diff.findAll { it ==~ pattern }
-            echo "Relevant changes detected (or first build). Will run heavy stages."
+            echo "Relevant changes detected (or first build). Running heavy stages."
             if (touched) { echo "Touched files:\n" + touched.join('\n') }
           } else {
             echo "No relevant changes for ApiGateway/Shared. Heavy stages will be skipped (build stays GREEN)."
@@ -58,7 +61,7 @@ pipeline {
     }
 
     stage('Tools (local dotnet tools)') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
           set -e
@@ -70,7 +73,7 @@ pipeline {
             echo "[tools] Restore local tools..."
             dotnet tool restore
             req_ver=10.3.0
-            cur_ver=$(dotnet tool list | awk "/dotnet-sonarscanner/ {print \\$2}")
+            cur_ver=$(dotnet tool list | awk '/dotnet-sonarscanner/ {print $2}')
             if [ "$cur_ver" != "$req_ver" ]; then
               echo "[tools] Update dotnet-sonarscanner to $req_ver..."
               dotnet tool update dotnet-sonarscanner --version "$req_ver"
@@ -82,10 +85,11 @@ pipeline {
     }
 
     stage('Start Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
           script {
+            // Build command as a list to avoid quoting issues
             def args = [
               'dotnet tool run dotnet-sonarscanner begin',
               "/k:${env.SONAR_PROJECT_KEY}",
@@ -102,7 +106,7 @@ pipeline {
     }
 
     stage('Restore & Test') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
           dotnet restore "$CSPROJ"
@@ -112,14 +116,14 @@ pipeline {
     }
 
     stage('Build & Publish') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
       }
     }
 
     stage('Finish Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
           sh 'dotnet tool run dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"'
@@ -128,7 +132,7 @@ pipeline {
     }
 
     stage('Quality Gate') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         timeout(time: 10, unit: 'MINUTES') {
           script {
@@ -140,7 +144,7 @@ pipeline {
     }
 
     stage('Docker Build & Push') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         script {
           def dockerSteps = {
