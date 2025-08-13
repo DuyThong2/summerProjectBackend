@@ -25,6 +25,7 @@ public class OrderController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetOrderById(Guid id)
     {
+        FileName fileName = new FileName();
         var result = await _mediator.Send(new GetOrderByIdQuery(id));
         if (result.Order == null)
             return NotFound();
