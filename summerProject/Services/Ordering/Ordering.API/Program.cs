@@ -19,7 +19,7 @@ builder.Services
 var serviceName = "ordering-api";
 var serviceVersion = "1.0.0";
 
-//builder.Services.AddOpenTelemetry()
+//builder.Services.AddOpenTele ssss metry()
 //    .WithTracing(tracer =>
 //    {
 //        tracer

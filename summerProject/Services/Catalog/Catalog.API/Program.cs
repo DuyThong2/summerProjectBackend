@@ -30,7 +30,7 @@ builder.Services.AddMediatR(config =>
     config.AddOpenBehavior(typeof(LoggingBehavior<,>));
 });
 
-// 2. AutoMapper & Controllers
+// 2. AutoMapper & Controllers sss
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(cfg => { }, typeof(CustomMapperProfile).Assembly);
 

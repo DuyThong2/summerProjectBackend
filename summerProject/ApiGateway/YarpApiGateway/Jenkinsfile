@@ -86,11 +86,16 @@ pipeline {
       steps {
         withSonarQubeEnv('sonarServer') {
           script {
-            def cmd = """dotnet tool run dotnet-sonarscanner begin /k:"$SONAR_PROJECT_KEY" /d:sonar.login="$SONAR_TOKEN" /d:sonar.host.url="$SONAR_HOST_URL" """
-            if (env.ENABLE_SONAR_BRANCH == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
-              cmd += " /d:sonar.branch.name=\\"${env.BRANCH_NAME}\\""
+            def args = [
+              'dotnet tool run dotnet-sonarscanner begin',
+              "/k:${env.SONAR_PROJECT_KEY}",
+              "/d:sonar.login=${env.SONAR_TOKEN}",
+              "/d:sonar.host.url=${env.SONAR_HOST_URL}"
+            ]
+            if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
+              args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
             }
-            sh cmd
+            sh args.join(' ')
           }
         }
       }

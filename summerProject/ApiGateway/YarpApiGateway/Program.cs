@@ -14,7 +14,10 @@ builder.Services.Configure<SwaggerSourceSetting>(
     builder.Configuration.GetSection(SwaggerSourceSetting.SectionName)
 );
 
-// CORS
+// CORS sss
+
+
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>

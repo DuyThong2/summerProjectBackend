@@ -83,7 +83,7 @@ app.UseEndpoints(endpoints =>
     endpoints.MapMetrics(); 
 });
 
-// 8. Seed Database
+// 8. Seed Databasesss
 await app.InitialiseDatabaseAsync();
 
 // 9. Run
