@@ -76,12 +76,6 @@ pipeline {
     }
 
     stage('Docker Build & Push') {
-      when {
-        changeset comparator: 'ANT', pattern: '''
-          summerProject/Services/Catalog/**/*
-          summerProject/Shared/**/*
-        '''
-      }
       steps {
         sh '''
           echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
