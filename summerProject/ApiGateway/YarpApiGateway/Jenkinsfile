@@ -6,7 +6,7 @@ pipeline {
     PROJECT_DIR = 'summerProject/ApiGateway/YarpApiGateway'
 
     DOCKERHUB = credentials('dockerhub-creds')
-    IMAGE_REPO = 'duythong2/yarpGateway'              
+    IMAGE_REPO = 'duythong2/yarpgateway'              
     IMAGE_TAG  = "${env.BUILD_NUMBER}"
 
     SONAR_TOKEN      = credentials('sonartoken')
