@@ -59,48 +59,26 @@ pipeline {
       }
     }
 
-    stage('Tools (local dotnet tools)') {
-      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
-      steps {
-        sh '''
-          set -e
-          if [ ! -f .config/dotnet-tools.json ]; then
-            echo "[tools] Create local tool manifest & install scanner..."
-            dotnet new tool-manifest
-            dotnet tool install dotnet-sonarscanner --version 10.3.0
-          else
-            echo "[tools] Restore local tools..."
-            dotnet tool restore
-            req_ver=10.3.0
-            cur_ver=$(dotnet tool list | awk '/dotnet-sonarscanner/ {print $2}')
-            if [ "$cur_ver" != "$req_ver" ]; then
-              echo "[tools] Update dotnet-sonarscanner to $req_ver..."
-              dotnet tool update dotnet-sonarscanner --version "$req_ver"
-            fi
-          fi
-          dotnet tool run dotnet-sonarscanner -- --version
-        '''
-      }
-    }
 
-    stage('Start Analysis') {
+   stage('Start Analysis') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
-          script {
-            // Build command as list to avoid quoting issues
-            def args = [
-              'dotnet tool run dotnet-sonarscanner begin',
-              "/k:${env.SONAR_PROJECT_KEY}",
-              "/d:sonar.login=${env.SONAR_TOKEN}",
-              "/d:sonar.host.url=${env.SONAR_HOST_URL}"
-            ]
-            if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' &&
-                env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
-              args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
-            }
-            sh args.join(' ')
-          }
+          sh '''
+            set -e
+            # Use local .NET tool manifest instead of global tool (avoid race)
+            if [ ! -f .config/dotnet-tools.json ]; then
+              dotnet new tool-manifest
+              dotnet tool install dotnet-sonarscanner --version 10.3.0
+            else
+              dotnet tool restore
+            fi
+
+            dotnet tool run dotnet-sonarscanner begin \
+              /k:"$SONAR_PROJECT_KEY" \
+              /d:sonar.login="$SONAR_TOKEN" \
+              /d:sonar.host.url="$SONAR_HOST_URL"
+          '''
         }
       }
     }
