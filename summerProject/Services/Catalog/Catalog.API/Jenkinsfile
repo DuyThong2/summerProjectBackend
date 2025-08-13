@@ -2,8 +2,8 @@ pipeline {
   agent any
   environment {
     DOTNET_CLI_TELEMETRY_OPTOUT = '1'
-    CSPROJ      = 'Services/Catalog/Catalog.API/Catalog.API.csproj'
-    PROJECT_DIR = 'Services/Catalog/Catalog.API'
+    PROJECT_DIR = 'summerProject/Services/Catalog/Catalog.API'
+    CSPROJ      = 'summerProject/Services/Catalog/Catalog.API/Catalog.API.csproj'
 
     DOCKERHUB = credentials('dockerhub-creds')       // <--- change if needed
     IMAGE_REPO = 'duythong2/catalog-api'               // <--- change to your DockerHub repo

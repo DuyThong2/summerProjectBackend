@@ -2,8 +2,8 @@ pipeline {
   agent any
   environment {
     DOTNET_CLI_TELEMETRY_OPTOUT = '1'
-    CSPROJ      = 'Services/Scheduling/Scheduling.API/Scheduling.API.csproj'
-    PROJECT_DIR = 'Services/Scheduling/Scheduling.API'
+    CSPROJ      = 'summerProject/Services/Scheduling/Scheduling.API/Scheduling.API.csproj'
+    PROJECT_DIR = 'summerProject/Services/Scheduling/Scheduling.API'
 
     DOCKERHUB = credentials('dockerhub-creds')
     IMAGE_REPO = 'duythong2/scheduling-api'           // <--- change
