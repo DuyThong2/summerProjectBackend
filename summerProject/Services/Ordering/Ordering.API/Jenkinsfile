@@ -5,12 +5,12 @@ pipeline {
     CSPROJ      = 'summerProject/Services/Ordering/Ordering.API/Ordering.API.csproj'
     PROJECT_DIR = 'summerProject/Services/Ordering/Ordering.API'
 
-    DOCKERHUB = credentials('dockerhub-creds')
-    IMAGE_REPO = 'duythong2/ordering-api'              // <--- change
-    IMAGE_TAG  = "${env.BUILD_NUMBER}"
+    DOCKERHUB   = credentials('dockerhub-creds')
+    IMAGE_REPO  = 'duythong2/ordering-api'
+    IMAGE_TAG   = "${env.BUILD_NUMBER}"
 
-    SONAR_TOKEN      = credentials('sonartoken')
-    SONAR_PROJECT_KEY = 'ordering-api'               // <--- change
+    SONAR_TOKEN       = credentials('sonartoken')
+    SONAR_PROJECT_KEY = 'ordering-api'
   }
   options { timestamps() }
 
@@ -21,9 +21,19 @@ pipeline {
       steps {
         withSonarQubeEnv('sonarServer') {
           sh '''
-            dotnet tool update --global dotnet-sonarscanner || dotnet tool install --global dotnet-sonarscanner
-            export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
-            dotnet sonarscanner begin /k:"$SONAR_PROJECT_KEY" /d:sonar.login="$SONAR_TOKEN" /d:sonar.host.url="$SONAR_HOST_URL"
+            set -e
+            # Use local .NET tool manifest instead of global tool (avoid race)
+            if [ ! -f .config/dotnet-tools.json ]; then
+              dotnet new tool-manifest
+              dotnet tool install dotnet-sonarscanner --version 10.3.0
+            else
+              dotnet tool restore
+            fi
+
+            dotnet tool run dotnet-sonarscanner begin \
+              /k:"$SONAR_PROJECT_KEY" \
+              /d:sonar.login="$SONAR_TOKEN" \
+              /d:sonar.host.url="$SONAR_HOST_URL"
           '''
         }
       }
@@ -48,8 +58,7 @@ pipeline {
       steps {
         withSonarQubeEnv('sonarServer') {
           sh '''
-            export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
-            dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"
+            dotnet tool run dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"
           '''
         }
       }
@@ -67,6 +76,12 @@ pipeline {
     }
 
     stage('Docker Build & Push') {
+      when {
+        changeset comparator: 'ANT', pattern: '''
+          summerProject/Services/Ordering/**/*
+          summerProject/Shared/**/*
+        '''
+      }
       steps {
         sh '''
           echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
