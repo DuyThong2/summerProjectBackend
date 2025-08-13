@@ -2,8 +2,6 @@ pipeline {
   agent any
   environment {
     DOTNET_CLI_TELEMETRY_OPTOUT = '1'
-
-    // === Service-specific ===
     PROJECT_DIR = 'summerProject/Services/Catalog/Catalog.API'
     CSPROJ      = 'summerProject/Services/Catalog/Catalog.API/Catalog.API.csproj'
 
@@ -13,95 +11,35 @@ pipeline {
 
     SONAR_TOKEN       = credentials('sonartoken')
     SONAR_PROJECT_KEY = 'catalog-api'
-
-    // Toggles / infra
-    ENABLE_SONAR_BRANCH   = '0'              // set '1' if SonarQube supports Branch Analysis (Developer+)
-    DOCKER_LOCK_RESOURCE  = 'docker-daemon'  // requires Lockable Resources plugin; set '' if not available
-
-    // Will be set to '1' if relevant changes are detected
-    RUN_PIPELINE = '0'
   }
-  options { timestamps(); disableConcurrentBuilds() }
+  options { timestamps() }
 
   stages {
     stage('Checkout') { steps { checkout scm } }
 
-    stage('Detect relevant changes') {
-      steps {
-        script {
-          def isFirst = (sh(returnStatus: true, script: 'git rev-parse HEAD~1 >/dev/null 2>&1') != 0)
-          def diff = sh(returnStdout: true, script: '''
-            set -e
-            git fetch --no-tags origin || true
-            if [ -n "$CHANGE_TARGET" ]; then
-              git diff --name-only "origin/$CHANGE_TARGET"...HEAD
-            else
-              if git rev-parse HEAD~1 >/dev/null 2>&1; then
-                git diff --name-only HEAD~1..HEAD
-              else
-                echo ""
-              fi
-            fi
-          ''').trim().split("\\r?\\n").findAll { it?.trim() }
-
-          // Catalog service + Shared libs
-          def pattern = ~/^(summerProject\/Services\/Catalog\/|summerProject\/Shared\/).*/
-          def relevant = isFirst || diff.any { it ==~ pattern }
-
-          env.RUN_PIPELINE = relevant ? '1' : '0'
-          if (relevant) {
-            def touched = diff.findAll { it ==~ pattern }
-            echo "Relevant changes detected (or first build). Running heavy stages."
-            if (touched) { echo "Touched files:\n" + touched.join('\n') }
-          } else {
-            echo "No relevant changes for Catalog/Shared. Heavy stages will be skipped (build stays GREEN)."
-          }
-        }
-      }
-    }
-
-    stage('Tools (local dotnet tools)') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
-      steps {
-        sh '''
-          set -e
-          if [ ! -f .config/dotnet-tools.json ]; then
-            echo "[tools] Create local tool manifest & install scanner..."
-            dotnet new tool-manifest
-            dotnet tool install dotnet-sonarscanner --version 10.3.0
-          else
-            echo "[tools] Restore local tools..."
-            dotnet tool restore
-            req_ver=10.3.0
-            cur_ver=$(dotnet tool list | awk '/dotnet-sonarscanner/ {print $2}')
-            if [ "$cur_ver" != "$req_ver" ]; then
-              echo "[tools] Update dotnet-sonarscanner to $req_ver..."
-              dotnet tool update dotnet-sonarscanner --version "$req_ver"
-            fi
-          fi
-          dotnet tool run dotnet-sonarscanner -- --version
-        '''
-      }
-    }
-
     stage('Start Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
-          script {
-            // Optionally add branch name when enabled and not on main/master
-            def cmd = """dotnet tool run dotnet-sonarscanner begin /k:"$SONAR_PROJECT_KEY" /d:sonar.login="$SONAR_TOKEN" /d:sonar.host.url="$SONAR_HOST_URL" """
-            if (env.ENABLE_SONAR_BRANCH == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
-              cmd += " /d:sonar.branch.name=\\\"${env.BRANCH_NAME}\\\""
-            }
-            sh cmd
-          }
+          sh '''
+            set -e
+            # Use local .NET tool manifest instead of global tool (avoid race)
+            if [ ! -f .config/dotnet-tools.json ]; then
+              dotnet new tool-manifest
+              dotnet tool install dotnet-sonarscanner --version 10.3.0
+            else
+              dotnet tool restore
+            fi
+
+            dotnet tool run dotnet-sonarscanner begin \
+              /k:"$SONAR_PROJECT_KEY" \
+              /d:sonar.login="$SONAR_TOKEN" \
+              /d:sonar.host.url="$SONAR_HOST_URL"
+          '''
         }
       }
     }
 
     stage('Restore & Test') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
       steps {
         sh '''
           dotnet restore "$CSPROJ"
@@ -111,23 +49,22 @@ pipeline {
     }
 
     stage('Build & Publish') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
       steps {
         sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
       }
     }
 
     stage('Finish Analysis') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
-          sh 'dotnet tool run dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"'
+          sh '''
+            dotnet tool run dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"
+          '''
         }
       }
     }
 
     stage('Quality Gate') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
       steps {
         timeout(time: 10, unit: 'MINUTES') {
           script {
@@ -139,42 +76,25 @@ pipeline {
     }
 
     stage('Docker Build & Push') {
-      when { beforeAgent true; expression { env.RUN_PIPELINE == '1' } }
+      when {
+        changeset comparator: 'ANT', pattern: '''
+          summerProject/Services/Catalog/**/*
+          summerProject/Shared/**/*
+        '''
+      }
       steps {
-        script {
-          def dockerSteps = {
-            sh '''
-              export DOCKER_BUILDKIT=1
-              echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
-
-              docker build -t "$IMAGE_REPO:$IMAGE_TAG" \
-                -f "$PROJECT_DIR/Dockerfile" \
-                summerProject
-
-              docker push "$IMAGE_REPO:$IMAGE_TAG"
-
-              # push 'latest' only on main/master
-              if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
-                docker tag  "$IMAGE_REPO:$IMAGE_TAG" "$IMAGE_REPO:latest"
-                docker push "$IMAGE_REPO:latest"
-              else
-                echo "Skip pushing 'latest' on branch $BRANCH_NAME"
-              fi
-            '''
-          }
-          if (env.DOCKER_LOCK_RESOURCE?.trim()) {
-            lock(resource: env.DOCKER_LOCK_RESOURCE) { dockerSteps() }
-          } else {
-            dockerSteps()
-          }
-        }
+        sh '''
+          echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
+          docker build -t "$IMAGE_REPO":"$IMAGE_TAG" -f "$PROJECT_DIR/Dockerfile" summerProject
+          docker push  "$IMAGE_REPO":"$IMAGE_TAG"
+          docker tag   "$IMAGE_REPO":"$IMAGE_TAG" "$IMAGE_REPO":latest
+          docker push  "$IMAGE_REPO":latest
+        '''
       }
     }
   }
 
   post {
-    always {
-      junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'
-    }
+    always { junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx' }
   }
 }
