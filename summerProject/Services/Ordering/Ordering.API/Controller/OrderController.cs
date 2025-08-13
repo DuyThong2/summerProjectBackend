@@ -36,6 +36,8 @@ public class OrderController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetOrders([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
     {
+        FileName fileName = new FileName();
+
         var paginationRequest = new PaginationRequest(pageNumber, pageSize);
         var result = await _mediator.Send(new GetOrdersQuery(paginationRequest));
         return Ok(result);
