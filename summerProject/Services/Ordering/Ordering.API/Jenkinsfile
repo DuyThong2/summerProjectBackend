@@ -46,10 +46,12 @@ pipeline {
 
     stage('Finish Analysis') {
       steps {
-        sh '''
-          export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
-          dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"
-        '''
+        withSonarQubeEnv('sonarServer') {
+          sh '''
+            export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
+            dotnet sonarscanner end
+          '''
+        }
       }
     }
 
