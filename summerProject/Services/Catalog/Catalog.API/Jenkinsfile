@@ -19,7 +19,7 @@ pipeline {
 
     stage('Start Analysis') {
       steps {
-        withSonarQubeEnv('SonarQube') {
+        withSonarQubeEnv('sonarServer') {
           sh '''
             dotnet tool update --global dotnet-sonarscanner || dotnet tool install --global dotnet-sonarscanner
             export PATH="$PATH:$HOME/.dotnet/tools:/var/lib/jenkins/.dotnet/tools"
