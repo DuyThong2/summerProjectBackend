@@ -15,6 +15,8 @@ public class TracingHeaderMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+
+
         var activity = Activity.Current;
 
         if (activity != null)
