@@ -16,7 +16,7 @@ builder.Services
     .AddApiServices(builder.Configuration);
 
 // Tracing ONLY (no metrics)
-var serviceName = "ordering-api";
+var serviceName = "ordering-apI";
 var serviceVersion = "1.0.0";
 
 //builder.Services.AddOpenTele ssss metry()
