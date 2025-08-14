@@ -43,7 +43,7 @@ pipeline {
           ''').trim().split("\\r?\\n").findAll { it?.trim() }
 
           // ApiGateway + Shared
-          def pattern = ~/^(summerProject\/ApiGateway\/|summerProject\/Shared\/).*/
+          def pattern = ~/^(summerProject\/ApiGateway\/|summerProject\/BuildingBlocks\/).*/
           def relevant = isFirst || diff.any { it ==~ pattern }
 
           // Write a workspace marker for later stages
@@ -67,7 +67,6 @@ pipeline {
         withSonarQubeEnv('sonarServer') {
           sh '''
             set -e
-            # Use local .NET tool manifest instead of global tool (avoid race)
             if [ ! -f .config/dotnet-tools.json ]; then
               dotnet new tool-manifest
               dotnet tool install dotnet-sonarscanner --version 10.3.0
@@ -75,11 +74,21 @@ pipeline {
               dotnet tool restore
             fi
 
-            dotnet tool run dotnet-sonarscanner begin \
-              /k:"$SONAR_PROJECT_KEY" \
-              /d:sonar.login="$SONAR_TOKEN" \
-              /d:sonar.host.url="$SONAR_HOST_URL"
+         
           '''
+
+          script {
+          def args = [
+            'dotnet tool run dotnet-sonarscanner begin',
+            "/k:${env.SONAR_PROJECT_KEY}",
+            "/d:sonar.login=${env.SONAR_TOKEN}",
+            "/d:sonar.host.url=${env.SONAR_HOST_URL}"
+          ]
+          if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
+            args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
+          }
+          sh args.join(' ')
+        }
         }
       }
     }
