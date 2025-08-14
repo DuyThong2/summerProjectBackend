@@ -14,7 +14,7 @@ pipeline {
 
     // Optional toggles
     ENABLE_SONAR_BRANCH   = '0'              // set '1' if SonarQube supports Branch Analysis (Developer+)
-    DOCKER_LOCK_RESOURCE  = 'docker-daemon'  // requires Lockable Resources plugin; set '' if not available
+    DOCKER_LOCK_RESOURCE  = 'docker-daemon'  // set '' if not available
   }
   options { timestamps(); disableConcurrentBuilds() }
 
@@ -43,7 +43,6 @@ pipeline {
           def pattern  = ~/^(summerProject\/Services\/Scheduling\/|summerProject\/BuildingBlocks\/).*/
           def relevant = isFirst || diff.any { it ==~ pattern }
 
-          // Write a workspace marker for later stages
           writeFile file: '.run_pipeline', text: (relevant ? '1' : '0')
 
           if (relevant) {
@@ -61,9 +60,9 @@ pipeline {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         withSonarQubeEnv('sonarServer') {
-          // prepare local tools first (avoid global tool race)
           sh '''
             set -e
+            # Use local .NET tool manifest (avoid global tool race)
             if [ ! -f .config/dotnet-tools.json ]; then
               dotnet new tool-manifest
               dotnet tool install dotnet-sonarscanner --version 10.3.0
@@ -71,7 +70,6 @@ pipeline {
               dotnet tool restore
             fi
           '''
-          // run begin with safe argument building
           script {
             def args = [
               'dotnet tool run dotnet-sonarscanner begin',
@@ -89,20 +87,31 @@ pipeline {
       }
     }
 
-    stage('Restore & Test') {
+    stage('Restore') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
-        sh '''
-          dotnet restore "$CSPROJ"
-          dotnet test "$CSPROJ" -c Release --logger "trx;LogFileName=test.trx"
-        '''
+        sh 'dotnet restore "$CSPROJ"'
       }
     }
 
-    stage('Build & Publish') {
+    stage('Build') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
-        sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
+        sh 'dotnet build "$CSPROJ" -c Release --no-restore'
+      }
+    }
+
+    stage('Test') {
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
+      steps {
+        sh 'dotnet test "$CSPROJ" -c Release --no-build --logger "trx;LogFileName=test.trx"'
+      }
+    }
+
+    stage('Publish') {
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
+      steps {
+        sh 'dotnet publish "$CSPROJ" -c Release --no-build -o "$PROJECT_DIR/publish"'
       }
     }
 
@@ -133,7 +142,6 @@ pipeline {
         script {
           def dockerSteps = {
             sh '''
-              export DOCKER_BUILDKIT=1
               echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
 
               docker build -t "$IMAGE_REPO:$IMAGE_TAG" \
@@ -162,6 +170,34 @@ pipeline {
   }
 
   post {
+    success {
+      script {
+        def dockerCleanup = {
+          sh '''
+            set -e
+            KEEP1="$IMAGE_REPO:$IMAGE_TAG"
+            KEEP2="$IMAGE_REPO:latest"
+
+            # Remove images of this repo except current & latest, and not used by any container
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
+              awk -v repo="$IMAGE_REPO" -v k1="$KEEP1" -v k2="$KEEP2" '
+                $1 ~ ("^"repo":") && $1 != k1 && $1 != k2 {print $2}
+              ' | sort -u | while read -r IMG_ID; do
+                if [ -z "$(docker ps -a --filter "ancestor=$IMG_ID" -q)" ]; then
+                  docker image rm -f "$IMG_ID" || true
+                fi
+              done
+          '''
+        }
+        if ((env.DOCKER_LOCK_RESOURCE ?: '').trim()) {
+          lock(resource: env.DOCKER_LOCK_RESOURCE) { dockerCleanup() }
+        } else {
+          dockerCleanup()
+        }
+      }
+
+      \
+    }
     always {
       sh 'rm -f .run_pipeline || true'
       junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'

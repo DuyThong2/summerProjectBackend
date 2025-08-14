@@ -134,20 +134,11 @@ pipeline {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
-          export DOCKER_BUILDKIT=1
           echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
-
-          docker build \
-            --label ci.repo="$IMAGE_REPO" \
-            --label ci.job="$JOB_NAME" \
-            --label ci.project="summerProject" \
-            -t "$IMAGE_REPO:$IMAGE_TAG" \
-            -f "$PROJECT_DIR/Dockerfile" \
-            summerProject
-
-          docker push "$IMAGE_REPO:$IMAGE_TAG"
-          docker tag  "$IMAGE_REPO:$IMAGE_TAG" "$IMAGE_REPO":latest
-          docker push "$IMAGE_REPO":latest
+          docker build -t "$IMAGE_REPO":"$IMAGE_TAG" -f "$PROJECT_DIR/Dockerfile" summerProject
+          docker push  "$IMAGE_REPO":"$IMAGE_TAG"
+          docker tag   "$IMAGE_REPO":"$IMAGE_TAG" "$IMAGE_REPO":latest
+          docker push  "$IMAGE_REPO":latest
         '''
       }
     }
@@ -180,12 +171,7 @@ pipeline {
         }
       }
 
-      // Clean only current job workspace (bin/obj/publish)
-      cleanWs(deleteDirs: false, notFailBuild: true, patterns: [
-        [pattern: '**/bin/**',     type: 'INCLUDE'],
-        [pattern: '**/obj/**',     type: 'INCLUDE'],
-        [pattern: '**/publish/**', type: 'INCLUDE']
-      ])
+     
     }
     always {
       sh 'rm -f .run_pipeline || true'
