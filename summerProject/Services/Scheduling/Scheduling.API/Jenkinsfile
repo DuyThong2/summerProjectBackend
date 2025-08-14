@@ -139,32 +139,13 @@ pipeline {
     stage('Docker Build & Push') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
-        script {
-          def dockerSteps = {
-            sh '''
-              echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
-
-              docker build -t "$IMAGE_REPO:$IMAGE_TAG" \
-                -f "$PROJECT_DIR/Dockerfile" \
-                summerProject
-
-              docker push "$IMAGE_REPO:$IMAGE_TAG"
-
-              # push 'latest' only on main/master
-              if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
-                docker tag  "$IMAGE_REPO:$IMAGE_TAG" "$IMAGE_REPO:latest"
-                docker push "$IMAGE_REPO:latest"
-              else
-                echo "Skip pushing 'latest' on branch $BRANCH_NAME"
-              fi
-            '''
-          }
-          if (env.DOCKER_LOCK_RESOURCE?.trim()) {
-            lock(resource: env.DOCKER_LOCK_RESOURCE) { dockerSteps() }
-          } else {
-            dockerSteps()
-          }
-        }
+        sh '''
+          echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
+          docker build -t "$IMAGE_REPO":"$IMAGE_TAG" -f "$PROJECT_DIR/Dockerfile" summerProject
+          docker push  "$IMAGE_REPO":"$IMAGE_TAG"
+          docker tag   "$IMAGE_REPO":"$IMAGE_TAG" "$IMAGE_REPO":latest
+          docker push  "$IMAGE_REPO":latest
+        '''
       }
     }
   }
