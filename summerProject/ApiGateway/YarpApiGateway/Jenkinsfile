@@ -16,8 +16,8 @@ pipeline {
     SONAR_TOKEN = credentials('sonartoken')
 
     // Toggles
-    ENABLE_SONAR_BRANCH = '0'            // set '1' if SonarQube supports Branch Analysis (Developer+)
-    DOCKER_LOCK_RESOURCE = 'docker-daemon' // requires Lockable Resources plugin; set '' if not available
+    ENABLE_SONAR_BRANCH = '0'              // set '1' if SonarQube supports Branch Analysis (Developer+)
+    DOCKER_LOCK_RESOURCE = 'docker-daemon' // set '' if you don't use Lockable Resources plugin
   }
   options { timestamps(); disableConcurrentBuilds() }
 
@@ -42,11 +42,10 @@ pipeline {
             fi
           ''').trim().split("\\r?\\n").findAll { it?.trim() }
 
-          // ApiGateway + Shared
+          // ApiGateway + BuildingBlocks
           def pattern = ~/^(summerProject\/ApiGateway\/|summerProject\/BuildingBlocks\/).*/
           def relevant = isFirst || diff.any { it ==~ pattern }
 
-          // Write a workspace marker for later stages
           writeFile file: '.run_pipeline', text: (relevant ? '1' : '0')
 
           if (relevant) {
@@ -54,12 +53,11 @@ pipeline {
             echo "Relevant changes detected (or first build). Running heavy stages."
             if (touched) { echo "Touched files:\n" + touched.join('\n') }
           } else {
-            echo "No relevant changes for ApiGateway/Shared. Heavy stages will be skipped (build stays GREEN)."
+            echo "No relevant changes for ApiGateway/BuildingBlocks. Heavy stages will be skipped (build stays GREEN)."
           }
         }
       }
     }
-
 
     stage('Start Analysis') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
@@ -73,41 +71,42 @@ pipeline {
             else
               dotnet tool restore
             fi
-
-         
           '''
-
           script {
-          def args = [
-            'dotnet tool run dotnet-sonarscanner begin',
-            "/k:${env.SONAR_PROJECT_KEY}",
-            "/d:sonar.login=${env.SONAR_TOKEN}",
-            "/d:sonar.host.url=${env.SONAR_HOST_URL}"
-          ]
-          if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' && env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
-            args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
+            def args = [
+              'dotnet tool run dotnet-sonarscanner begin',
+              "/k:${env.SONAR_PROJECT_KEY}",
+              "/d:sonar.login=${env.SONAR_TOKEN}",
+              "/d:sonar.host.url=${env.SONAR_HOST_URL}"
+            ]
+            if ((env.ENABLE_SONAR_BRANCH ?: '0') == '1' &&
+                env.BRANCH_NAME && !(env.BRANCH_NAME in ['main','master'])) {
+              args << "/d:sonar.branch.name=${env.BRANCH_NAME}"
+            }
+            sh args.join(' ')
           }
-          sh args.join(' ')
-        }
         }
       }
     }
 
-    stage('Restore & Test') {
+    stage('Restore') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
-      steps {
-        sh '''
-          dotnet restore "$CSPROJ"
-          dotnet test "$CSPROJ" -c Release --logger "trx;LogFileName=test.trx"
-        '''
-      }
+      steps { sh 'dotnet restore "$CSPROJ"' }
     }
 
-    stage('Build & Publish') {
+    stage('Build') {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
-      steps {
-        sh 'dotnet publish "$CSPROJ" -c Release -o "$PROJECT_DIR/publish"'
-      }
+      steps { sh 'dotnet build "$CSPROJ" -c Release --no-restore' }
+    }
+
+    stage('Test') {
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
+      steps { sh 'dotnet test "$CSPROJ" -c Release --no-build --logger "trx;LogFileName=test.trx"' }
+    }
+
+    stage('Publish') {
+      when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
+      steps { sh 'dotnet publish "$CSPROJ" -c Release --no-build -o "$PROJECT_DIR/publish"' }
     }
 
     stage('Finish Analysis') {
@@ -135,17 +134,62 @@ pipeline {
       when { expression { fileExists('.run_pipeline') && readFile('.run_pipeline').trim() == '1' } }
       steps {
         sh '''
+          export DOCKER_BUILDKIT=1
           echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
-          docker build -t "$IMAGE_REPO":"$IMAGE_TAG" -f "$PROJECT_DIR/Dockerfile" summerProject
-          docker push  "$IMAGE_REPO":"$IMAGE_TAG"
-          docker tag   "$IMAGE_REPO":"$IMAGE_TAG" "$IMAGE_REPO":latest
-          docker push  "$IMAGE_REPO":latest
+
+          docker build \
+            --label ci.repo="$IMAGE_REPO" \
+            --label ci.job="$JOB_NAME" \
+            --label ci.project="summerProject" \
+            -t "$IMAGE_REPO:$IMAGE_TAG" \
+            -f "$PROJECT_DIR/Dockerfile" \
+            summerProject
+
+          docker push "$IMAGE_REPO:$IMAGE_TAG"
+          docker tag  "$IMAGE_REPO:$IMAGE_TAG" "$IMAGE_REPO":latest
+          docker push "$IMAGE_REPO":latest
         '''
       }
     }
   }
 
   post {
-    always { junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx' }
+    success {
+      script {
+        def dockerCleanup = {
+          sh '''
+            set -e
+            KEEP1="$IMAGE_REPO:$IMAGE_TAG"
+            KEEP2="$IMAGE_REPO:latest"
+
+            # Remove images of this repo except current & latest, and not used by any container
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
+              awk -v repo="$IMAGE_REPO" -v k1="$KEEP1" -v k2="$KEEP2" '
+                $1 ~ ("^"repo":") && $1 != k1 && $1 != k2 {print $2}
+              ' | sort -u | while read -r IMG_ID; do
+                if [ -z "$(docker ps -a --filter "ancestor=$IMG_ID" -q)" ]; then
+                  docker image rm -f "$IMG_ID" || true
+                fi
+              done
+          '''
+        }
+        if ((env.DOCKER_LOCK_RESOURCE ?: '').trim()) {
+          lock(resource: env.DOCKER_LOCK_RESOURCE) { dockerCleanup() }
+        } else {
+          dockerCleanup()
+        }
+      }
+
+      // Clean only current job workspace (bin/obj/publish)
+      cleanWs(deleteDirs: false, notFailBuild: true, patterns: [
+        [pattern: '**/bin/**',     type: 'INCLUDE'],
+        [pattern: '**/obj/**',     type: 'INCLUDE'],
+        [pattern: '**/publish/**', type: 'INCLUDE']
+      ])
+    }
+    always {
+      sh 'rm -f .run_pipeline || true'
+      junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'
+    }
   }
 }
