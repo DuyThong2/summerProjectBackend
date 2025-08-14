@@ -153,41 +153,29 @@ pipeline {
   }
 
   post {
-    success {
-      script {
-        def dockerCleanup = {
-          sh '''
-            set -e
-            KEEP1="$IMAGE_REPO:$IMAGE_TAG"
-            KEEP2="$IMAGE_REPO:latest"
+      success {
+        sh '''
+          set -e
+          KEEP1="$IMAGE_REPO:$IMAGE_TAG"
+          KEEP2="$IMAGE_REPO:latest"
 
-            # Remove images of this repo except current & latest, and not used by any container
-            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
-              awk -v repo="$IMAGE_REPO" -v k1="$KEEP1" -v k2="$KEEP2" '
-                $1 ~ ("^"repo":") && $1 != k1 && $1 != k2 {print $2}
-              ' | sort -u | while read -r IMG_ID; do
-                if [ -z "$(docker ps -a --filter "ancestor=$IMG_ID" -q)" ]; then
-                  docker image rm -f "$IMG_ID" || true
-                fi
-              done
-          '''
-        }
-        if ((env.DOCKER_LOCK_RESOURCE ?: '').trim()) {
-          lock(resource: env.DOCKER_LOCK_RESOURCE) { dockerCleanup() }
-        } else {
-          dockerCleanup()
-        }
+          # Collect images of this repo except current & latest
+          TO_DELETE=$(docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
+            awk -v repo="$IMAGE_REPO" -v k1="$KEEP1" -v k2="$KEEP2" '
+              $1 ~ ("^"repo":") && $1 != k1 && $1 != k2 {print $2}
+            ' | sort -u)
+
+          if [ -n "$TO_DELETE" ]; then
+            echo "Removing old images for $IMAGE_REPO (excluding $KEEP1 and $KEEP2):"
+            echo "$TO_DELETE" | xargs -r -n1 docker image rm -f || true
+          else
+            echo "No old images to remove for $IMAGE_REPO"
+          fi
+        '''
       }
-
-      cleanWs(deleteDirs: false, notFailBuild: true, patterns: [
-        [pattern: '**/bin/**',     type: 'INCLUDE'],
-        [pattern: '**/obj/**',     type: 'INCLUDE'],
-        [pattern: '**/publish/**', type: 'INCLUDE']
-      ])
-    }
-    always {
-      sh 'rm -f .run_pipeline || true'
-      junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'
-    }
-  }
+      always {
+        sh 'rm -f .run_pipeline || true'
+        junit allowEmptyResults: true, testResults: '**/TestResults/**/*.trx'
+      }
+   }
 }
