@@ -25,7 +25,6 @@ namespace Catalog.API.Data
             PackageIngredients = database.GetCollection<PackageIngredient>(settings.PackageIngredientCollectionName);
             Ingredients = database.GetCollection<Ingredient>(settings.IngredientCollectionName);
 
-            // Optional: seed only Products or any other collection
             CatalogContextSeed.SeedData(Products, Meals, Category, Packages, Ingredients);
         }
 
