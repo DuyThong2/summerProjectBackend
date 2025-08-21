@@ -17,6 +17,8 @@ namespace Catalog.API.Data
             var database = client.GetDatabase(settings.DatabaseName);
 
             Products = database.GetCollection<Product>(settings.ProductCollectionName);
+
+
             Meals = database.GetCollection<Meal>(settings.MealCollectionName);
             Category = database.GetCollection<Category>(settings.CategoryCollectionName);
             Packages = database.GetCollection<Package>(settings.PackageCollectionName);
