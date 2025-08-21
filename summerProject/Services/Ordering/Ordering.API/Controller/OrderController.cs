@@ -25,7 +25,6 @@ public class OrderController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetOrderById(Guid id)
     {
-        FileName fileName = new FileName();
         var result = await _mediator.Send(new GetOrderByIdQuery(id));
         if (result.Order == null)
             return NotFound();
@@ -36,7 +35,6 @@ public class OrderController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetOrders([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
     {
-        FileName fileName = new FileName();
 
         var paginationRequest = new PaginationRequest(pageNumber, pageSize);
         var result = await _mediator.Send(new GetOrdersQuery(paginationRequest));

@@ -228,6 +228,16 @@ services:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
 
+  frontend:
+    image: summer-frontend:prod
+    build:
+      context: ../../frontend/summer-project
+      dockerfile: Dockerfile 
+    ports:
+      - "5172:80"           
+    depends_on:
+      - yarpapigateway
+
 volumes:
   schedulingdb_data:
   grafana-data:
